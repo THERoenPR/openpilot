@@ -3,6 +3,7 @@ import numpy as np
 from collections import deque
 
 from cereal import log
+from opendbc.car.honda.values import CAR
 from opendbc.car.lateral import FRICTION_THRESHOLD, get_friction
 from opendbc.car.tests.test_lateral_limits import MAX_LAT_JERK_UP
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
@@ -24,6 +25,8 @@ from openpilot.common.pid import PIDController
 
 LOW_SPEED_X = [0, 10, 20, 30]
 LOW_SPEED_Y = [15, 13, 10, 5]
+LOW_SPEED_Y_CLARITY = [30, 15, 10, 5]
+LOW_SPEED_Y_CIVIC = [40, 20, 10, 5]
 
 
 class LatControlTorque(LatControl):
@@ -36,6 +39,10 @@ class LatControlTorque(LatControl):
                              k_f=self.torque_params.kf, rate=1/self.dt)
     self.update_limits()
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
+
+    # specific car fingerprint
+    self.carFingerprint = CP.carFingerprint
+
     self.LATACCEL_REQUEST_BUFFER_NUM_FRAMES = int(1 / self.dt)
     self.requested_lateral_accel_buffer = deque([0.] * self.LATACCEL_REQUEST_BUFFER_NUM_FRAMES , maxlen=self.LATACCEL_REQUEST_BUFFER_NUM_FRAMES)
     self.previous_measurement = 0.0
@@ -74,7 +81,14 @@ class LatControlTorque(LatControl):
       measurement_rate = self.measurement_rate_filter.update((measurement - self.previous_measurement) / self.dt)
       self.previous_measurement = measurement
 
-      low_speed_factor = (np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y) / max(CS.vEgo, MIN_SPEED)) ** 2
+      if self.carFingerprint == CAR.HONDA_CLARITY:
+        lsfinterp = np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y_CLARITY)
+      elif self.carFingerprint == CAR.HONDA_CIVIC:
+        lsfinterp = np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y_CIVIC)
+      else:
+        lsfinterp = np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y)
+
+      low_speed_factor = lsfinterp * lsfinterp
       setpoint = lat_delay * desired_lateral_jerk + expected_lateral_accel
       error = setpoint - measurement
       error_lsf = error + low_speed_factor / self.torque_params.kp * error
